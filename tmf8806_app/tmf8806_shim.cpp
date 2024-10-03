@@ -1,31 +1,53 @@
-/*
- *****************************************************************************
- * Copyright by ams OSRAM AG                                                       *
- * All rights are reserved.                                                  *
- *                                                                           *
- * IMPORTANT - PLEASE READ CAREFULLY BEFORE COPYING, INSTALLING OR USING     *
- * THE SOFTWARE.                                                             *
- *                                                                           *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS       *
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT         *
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS         *
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT  *
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,     *
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT          *
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,     *
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY     *
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT       *
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE     *
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.      *
- *****************************************************************************
- */
+/*****************************************************************************
+* Copyright (c) [2024] ams-OSRAM AG                                          *
+* All rights are reserved.                                                   *
+*                                                                            *
+* FOR FULL LICENSE TEXT SEE LICENSE.TXT                                      *
+******************************************************************************/
+ 
+// Please note that this file as a c++ file. This is due to the fact that the arduino 
+// implements some functions that are used here in c++. E.g. the Serial library is
+// implemented as a c++ library.
+// If you implement all functions in your shim as pure C function, you may name your
+// shim layer file as: tmf8806_shim.c and compile it with a C compiler. 
+// In this case you should remove the these lines from the tmf8806_shim.h file:
+// #if defined( __cplusplus)
+// extern "C"
+// {
+// #endif
+// 
+// and at the very end of the file:
+//
+// #if defined( __cplusplus)
+// }
+// #endif
+//
+// These macros are only used to allow cross-language (C and C++) compatibility. 
+// 
+
 
 #include "tmf8806_shim.h"
 #include "tmf8806.h"
 #include "Arduino.h"
 #include <time.h>
 #include <Wire.h>
+#include <avr/wdt.h>
 
+// section with forward declaration of plain C functions
+#if defined( __cplusplus)
+extern "C"
+{
+#endif 
+
+void timerInterruptHandler( void ); // forward declarations - function is implemented in a different file
+
+#if defined( __cplusplus)
+}
+#endif 
+
+
+
+// time/ memory access functions -------------------------------------------------------------------------------------------
 
 void delayInMicroseconds ( uint32_t wait )
 {
@@ -37,10 +59,114 @@ uint32_t getSysTick ( )
   return micros( );
 }
 
+// due to the limited RAM of the Arduino Uno all constants are written to flash, therefore a special access method
+// is need to read bytes from flash instead of from RAM. (The RAM address range is in a different location.)
 uint8_t readProgramMemoryByte ( const uint8_t * ptr )
 {
   uint32_t address = (uint32_t)ptr;
-  return pgm_read_byte( address );
+  return pgm_read_byte( address );          
+}
+
+
+// ---------------------------------- timer functions ---------------------------------------------
+// timer functions - on Uno use the watchdog which can wakeup the arduino uno from power-down state ---------------------
+
+// to keep the arduino uno specific macros in the shim file, the redirection of the ISR to the timerInterruptHandler function which
+// is part of tmf8806_app.c
+ISR(WDT_vect)
+{
+  timerInterruptHandler( );
+}
+
+// Arduino Uno specific defines for the Watchdog
+#define WDP210_MASKED(i)       ( (i) & ((1<<(WDP2+1))-1) )
+#define WDP3_MOVED(i)          ( ((i) & (1<<(WDP2+1))) << (WDP3-WDP2-1) )
+#define WDT_LIMIT(t)           ( (t) > (16<<9) ? (16<<9) : (t) )          // watchdog can only have these values: 16, 16<<1, 16<<2, .., 16<<9 == 8192 ms
+
+/* function converts the time given to the next equal or bigger timeout the 
+   Arduino Uno Watchdog can handle. Values for the ARudino Uno watchdog are:
+   16ms, 32ms, 64ms, 128ms, 256ms, 512ms, 1024ms=~1s, 2048ms=~2s, 4096ms=~4s,
+   8192ms=~8s. Everything bigger is set to 8192ms. 
+   The function then returns the bitfield that is needed for the WD3,WD2,WD1,WD0
+   */
+static uint8_t timeToWdtIndex( uint16_t timerInMs )
+{
+  uint8_t i = 0;                                
+  uint16_t timerValue = 16;                     // start with the minimum time to wait
+  timerInMs = WDT_LIMIT(timerInMs);             // if given time value is greater than 8192, then set it to 8192
+  while ( timerValue < timerInMs )              // the Arduino Uno WDT has 10 settings for timeout 0 .. 9
+  {
+    timerValue *= 2;                            // the timerValue is a power of 2 so we go through them  
+    i++;                                        // this is the binary representation of the index: WDP3 WDP2 WDP1 WDP0 (bits)
+  }
+  i = WDP3_MOVED(i) + WDP210_MASKED(i);         // WDP3 is actually bit 5, make room for bits 3 and 4
+  return i;
+}
+
+void timerStartPeriodic ( void * dptr, uint16_t timeInMs )
+{
+  uint8_t r = timeToWdtIndex( timeInMs );
+  (void)dptr;
+  disableInterrupts();
+  WDTCSR = (1 << WDCE) | (1 << WDE); // Watchdog Change Enable + Watchdog enable - both are needed to change the prescaler
+  WDTCSR = r;                        // set watchdog prescaler and clear WDCE and clear WDE
+  WDTCSR |= (1 << WDIE);             // enable interrupt for watchdog - can be set without Watchdog enabled (=WDE)
+  enableInterrupts();
+}
+
+void timerStop ( void * dptr )
+{
+  disableInterrupts();
+  WDTCSR = 0 ;                      // Watchdog off (prescaler remains untouched)
+  enableInterrupts();
+  (void)dptr;
+}
+
+
+// Power down function ---------------------------------------------------------------------------------------------------
+
+void powerDown ( void * dptr )
+{
+  SMCR = (1<<SM1) | (1<<SE) ;       // setting SM2..0 to value b010 and the SE = Sleep enable bit
+  __asm__ __volatile__ ("sleep");   // execute a sleep instruction - there is no C-equivalent to using assembly in this case
+}
+
+
+// interrupt related functions --------------------------------------------------------------------------------
+
+void setInterruptHandler( void (* handler)( void ) )
+{
+  attachInterrupt( digitalPinToInterrupt( INTERRUPT_PIN ), handler, FALLING );
+}
+
+void disableInterruptHandler( uint8_t pin )
+{
+  detachInterrupt( digitalPinToInterrupt( pin ) );
+}
+
+void disableInterrupts ( void )
+{
+  noInterrupts( );
+}
+
+void enableInterrupts ( void )
+{
+  interrupts( );
+}
+
+
+// pin control functions ------------------------------------------------------------------------------------------------
+
+void pinOutput ( void * dptr, uint8_t pin )
+{
+  (void)dptr; // not used here
+  pinMode( pin, OUTPUT );      /* define a pin as output */
+}
+
+void pinInput ( void * dptr, uint8_t pin )
+{ 
+  (void)dptr; // not used here
+  pinMode( pin, INPUT );      /* define a pin as input */
 }
 
 void enablePinHigh ( void * dptr )
@@ -55,19 +181,49 @@ void enablePinLow ( void * dptr )
   digitalWrite( ENABLE_PIN, LOW );   
 }
 
-void i2cOpen ( void * dptr, uint32_t i2cClockSpeedInHz )
+void resultPinHigh ( void * dptr )
 {
   (void)dptr; // not used here
-  Wire.begin( );
-  Wire.setClock( i2cClockSpeedInHz );
+  digitalWrite( RESULT_PIN, HIGH );  
 }
 
-void i2cClose ( void * dptr )
+void resultPinLow ( void * dptr )
 {
   (void)dptr; // not used here
-  Wire.end( );
+  digitalWrite( RESULT_PIN, LOW );   
 }
 
+void ledPinHigh ( void * dptr )
+{
+  (void)dptr; // not used here
+  digitalWrite( LED_PIN, HIGH );  
+}
+
+void ledPinLow ( void * dptr )
+{
+  (void)dptr; // not used here
+  digitalWrite( LED_PIN, LOW );   
+}
+
+
+// printing functions ------------------------------------------------------------------------------------------------
+
+void uartOpen ( uint32_t baudrate )
+{
+  Serial.end( );                                     // this clears any old pending data 
+  Serial.begin( baudrate );
+}
+
+void uartClose ( )
+{
+  Serial.end( );
+}
+
+void printConstStr ( const char * str )
+{
+  /* casting back to Arduino specific memory */
+  Serial.print( reinterpret_cast<const __FlashStringHelper *>( str ) );
+}
 
 void printChar ( char c ) 
 {
@@ -97,23 +253,23 @@ void printStr ( char * str )
 void printLn ( void )
 {
   Serial.print( '\n' );
+  Serial.flush( );
 }
 
 
-#if ( ( 128 / ARDUINO_MAX_I2C_TRANSFER ) * ARDUINO_MAX_I2C_TRANSFER != 128 )
-    #error "ARDUINO_MAX_I2C_TRANSFER size must be a divider of 128"
-#endif
+// I2C functions ---------------------------------------------------------------------------------------------------
 
-int8_t tmf8806ReadQuadHistogram ( void * dptr, uint8_t slaveAddr, uint8_t * buffer )
+void i2cOpen ( void * dptr, uint32_t i2cClockSpeedInHz )
 {
-  int8_t res = I2C_SUCCESS;
-  // need to read reverse the histogram as a read of register 0x30 will lead to an i2c bank
-  // switch at the tmf8806, and mess up the histograms
-  for ( int8_t i = 128 - ARDUINO_MAX_I2C_TRANSFER; i >= 0 && res == I2C_SUCCESS; i -= ARDUINO_MAX_I2C_TRANSFER )
-  {
-    res = i2cRxReg( dptr, slaveAddr, TMF8806_COM_RESULT_NUMBER + i, ARDUINO_MAX_I2C_TRANSFER, buffer+i );
-  }
-  return res;
+  (void)dptr; // not used here
+  Wire.begin( );
+  Wire.setClock( i2cClockSpeedInHz );
+}
+
+void i2cClose ( void * dptr )
+{
+  (void)dptr; // not used here
+  Wire.end( );
 }
 
 static int8_t i2cTxOnly ( uint8_t logLevel, uint8_t slaveAddr, uint8_t regAddr, uint16_t toTx, const uint8_t * txData )
@@ -251,61 +407,23 @@ int8_t i2cTxRx ( void * dptr, uint8_t slaveAddr, uint16_t toTx, const uint8_t * 
   return res;
 }
 
-void inputOpen ( uint32_t baudrate )
-{
-  Serial.end( );                                     // this clears any old pending data 
-  Serial.begin( baudrate );
-}
 
-void inputClose ( )
-{
-  Serial.end( );
-}
+// read-out functions that require special treatment because the arduino uno has so little memory ---------------------------------------------------
 
-int8_t inputGetKey ( char *c )
+#if ( ( 128 / ARDUINO_MAX_I2C_TRANSFER ) * ARDUINO_MAX_I2C_TRANSFER != 128 )
+    #error "ARDUINO_MAX_I2C_TRANSFER size must be a divider of 128"
+#endif
+
+int8_t tmf8806ReadQuadHistogram ( void * dptr, uint8_t slaveAddr, uint8_t * buffer )
 {
-  if ( Serial.available() )
+  int8_t res = I2C_SUCCESS;
+  // need to read reverse the histogram as a read of register 0x30 will lead to an i2c bank
+  // switch at the tmf8806, and mess up the histograms
+  for ( int8_t i = 128 - ARDUINO_MAX_I2C_TRANSFER; i >= 0 && res == I2C_SUCCESS; i -= ARDUINO_MAX_I2C_TRANSFER )
   {
-    *c = Serial.read();
-    return 1;
+    res = i2cRxReg( dptr, slaveAddr, TMF8806_COM_RESULT_NUMBER + i, ARDUINO_MAX_I2C_TRANSFER, buffer+i );
   }
-  return 0;
-}
-
-void printConstStr ( const char * str )
-{
-  /* casting back to Arduino specific memory */
-  Serial.print( reinterpret_cast<const __FlashStringHelper *>( str ) );
-}
-
-void pinOutput ( uint8_t pin )
-{
-  pinMode( pin, OUTPUT );      /* define a pin as output */
-}
-
-void pinInput ( uint8_t pin )
-{ 
-  pinMode( pin, INPUT );      /* define a pin as input */
-}
-
-void setInterruptHandler( void (* handler)( void ) )
-{
-  attachInterrupt( digitalPinToInterrupt( INTERRUPT_PIN ), handler, FALLING );
-}
-
-void disableInterruptHandler( uint8_t pin )
-{
-  detachInterrupt( digitalPinToInterrupt( pin ) );
-}
-
-void disableInterrupts ( void )
-{
-  noInterrupts( );
-}
-
-void enableInterrupts ( void )
-{
-  interrupts( );
+  return res;
 }
 
 void tmf8806ScaleAndPrintHistogram ( void * dptr, uint8_t histType, uint8_t id, uint8_t * data, uint8_t scale )

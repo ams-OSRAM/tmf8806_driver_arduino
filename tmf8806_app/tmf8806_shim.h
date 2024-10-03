@@ -1,24 +1,10 @@
-/*
- *****************************************************************************
- * Copyright by ams OSRAM AG                                                       *
- * All rights are reserved.                                                  *
- *                                                                           *
- * IMPORTANT - PLEASE READ CAREFULLY BEFORE COPYING, INSTALLING OR USING     *
- * THE SOFTWARE.                                                             *
- *                                                                           *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS       *
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT         *
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS         *
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT  *
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,     *
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT          *
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,     *
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY     *
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT       *
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE     *
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.      *
- *****************************************************************************
- */
+/*****************************************************************************
+* Copyright (c) [2024] ams-OSRAM AG                                          *
+* All rights are reserved.                                                   *
+*                                                                            *
+* FOR FULL LICENSE TEXT SEE LICENSE.TXT                                      *
+******************************************************************************/
+ 
 
 #ifndef TMF8806_SHIM_H
 #define TMF8806_SHIM_H
@@ -50,10 +36,12 @@ extern "C"
 
 #define ENABLE_PIN                                6     /**< on the arduino uno the enable pin is connected to digital 6 */
 #define INTERRUPT_PIN                             2     /**< interupt to digital 2 */
+#define RESULT_PIN                                3     /**< pin 2 is interreupt, pin 6 is enable line, pins 0+1 are uart, so pin 3 is available */
+#define LED_PIN                                   LED_BUILTIN
 
 #define USE_INTERRUPT_TO_TRIGGER_READ             1     /**< do not define this, or set to 0 to use i2c polling instead of interrupt pin */
 
-
+    
 // ---------------------------------------------- macros ------------------------------------------
 
 
@@ -98,6 +86,69 @@ uint32_t getSysTick( );
  */
 uint8_t readProgramMemoryByte( const uint8_t * ptr );
 
+
+// ---------------------------------- timer functions ---------------------------------------------
+
+/** @brief Function to start/restart the periodic timer but do not not reset already counted ticks   
+ * @param dptr a pointer to a data structure the function needs for timer setup, can
+ * be 0-pointer if the function does not need it
+ * @param timeInMs the time in ms that the periodic timer shall use
+*/
+void timerStartPeriodic( void * dptr, uint16_t timeInMs );
+
+/** @brief Function to stop the periodic timer 
+ * @param dptr a pointer to a data structure the function needs for timer stop, can
+ * be 0-pointer if the function does not need it
+*/
+void timerStop( void * dptr );
+
+
+// ---------------------------------- power state functions --------------------------------------
+
+/** @brief Function to enter power down. Wakeup will be through timeout or an interrupt that can 
+ * trigger a wakeup (depending on MCU)  
+*/
+void powerDown( void * dptr );
+
+
+// ---------------------------------- interrupt functions --------------------------------------
+
+/** @brief Function registers given function handler as Interrupt Handler function for the
+ *  interrupt pin
+ *  @param[in] handler pointer to the interrupt service routine   
+ */
+void setInterruptHandler( void (* handler)( void ) );
+
+/** @brief Function removes any Interrupt Handler function
+ */
+void clrInterruptHandler( void );
+
+/** @brief Function globally disables interrupts
+ */
+void disableInterrupts( void );
+
+/** @brief Function globally enables interrupts
+ */
+void enableInterrupts( void );
+
+
+// ---------------------------------- pin functions ---------------------------------------------
+
+/** @brief Function defines the given pin as output
+ * @param[in] dptr ... a pointer to a data structure the function needs for setting the pin direction, can
+ * be 0-pointer if the function does not need it
+ * @param[in] pin ... pin number that shall be set to output mode
+ */
+void pinOutput( void * dptr, uint8_t pin );
+
+/** @brief Function defines the given pin as input
+ * @param[in] dptr ... a pointer to a data structure the function needs for setting the pin direction, can
+ * be 0-pointer if the function does not need it
+ * @param[in] pin ... pin number that shall be set to input mode
+ */
+void pinInput( void * dptr,  uint8_t pin );
+
+
 /** @brief Function sets the enable pin HIGH. Note that the enable pin must be configured
  * for output (with e.g. function pinOutput)
  * @param[in] dptr ... a pointer to a data structure the function needs for setting the enable pin, can
@@ -111,6 +162,46 @@ void enablePinHigh( void * dptr );
  * be 0-pointer if the function does not need it
  */
 void enablePinLow( void * dptr );
+
+/** @brief Function sets the result-in-range pin HIGH. Note that the result pin must be configured
+ * for output (with e.g. function pinOutput)
+ * @param[in] dptr ... a pointer to a data structure the function needs for setting the pin, can
+ * be 0-pointer if the function does not need it
+ */
+void resultPinHigh( void * dptr );
+
+/** @brief Function sets the result-in-range pin LOW. Note that the result pin must be configured
+ * for output (with e.g. function pinOutput)
+ * @param[in] dptr ... a pointer to a data structure the function needs for setting the pin, can
+ * be 0-pointer if the function does not need it
+ */
+void resultPinLow( void * dptr );
+
+/** @brief Function sets the led pin HIGH. Note that the led pin must be configured
+ * for output (with e.g. function pinOutput)
+ * @param[in] dptr ... a pointer to a data structure the function needs for setting the pin, can
+ * be 0-pointer if the function does not need it
+ */
+void ledPinHigh( void * dptr );
+
+/** @brief Function sets the result-in-range pin LOW. Note that the led pin must be configured
+ * for output (with e.g. function pinOutput)
+ * @param[in] dptr ... a pointer to a data structure the function needs for setting the pin, can
+ * be 0-pointer if the function does not need it
+ */
+void ledPinLow( void * dptr );
+
+
+// ---------------------------------- I2C functions ---------------------------------------------
+
+/**  Return codes for i2c functions: 
+ */
+#define I2C_SUCCESS             0       /**< successfull execution no error */
+#define I2C_ERR_DATA_TOO_LONG   -1      /**< driver cannot handle given amount of data for tx/rx */
+#define I2C_ERR_SLAVE_ADDR_NAK  -2      /**< device nak'ed slave address */
+#define I2C_ERR_DATA_NAK        -3      /**< device nak'ed written data */
+#define I2C_ERR_OTHER           -4      /**< any other error */
+#define I2C_ERR_TIMEOUT         -5      /**< timeout in waiting for slave to respond */
 
 /** @brief Function will open the I2C master and configure for the given speed (if possible),
  * else it will reduce the speed to the available frequency
@@ -126,58 +217,6 @@ void i2cOpen( void * dptr, uint32_t i2cClockSpeedInHz );
  */
 void i2cClose( void * dptr );
 
-/** @brief Function to read a 128 bytes == 1/4 of a 256 bin (2bytes) histogram
- * needed as reading register 0x30 will lead to register bank switching
- * on the device and the arduino uno can only read chunks of 32 bytes
- * So this function reads the quater histogram in reverse order.
- * @param[in] dptr ... a pointer to a data structure the function needs for transmitting, can
- * be 0-pointer if the function does not need it
- * @param[in] slaveAddr ... the i2c slave address to be used (7-bit)
- * @param[in] buffer ... a pointer to a buffer of minimum size of 128 bytes
- * \return 0 when successfully transmitted, else an error code 
- */
-int8_t tmf8806ReadQuadHistogram( void * dptr, uint8_t slaveAddr, uint8_t * buffer );
-
-/** @brief Function outputs a single character. E.g. on a UART.
- *  @param[in] c the character to be printed 
- */
-void printChar( char c );
-
-/** @brief Function outputs a signed integer. E.g. on a UART.
- *  @param[in] i the integer to be printed 
- */
-void printInt( int32_t i );
-
-/** @brief Function outputs an unsigned integer. E.g. on a UART.
- *  @param[in] i the integer to be printed 
- */
-void printUint( uint32_t i );
-
-/** @brief Function outputs an unsigned integer in HEX format. E.g. on a UART.
- *  @param[in] i the integer to be printed 
- */
-void printUintHex( uint32_t i );
-
-/** @brief Function outputs a zero terminated string. E.g. on a UART.
- *  @param[in] str pointer to string to be printed  
- */
-void printStr( char * str );
-
-/** @brief Function outputs a new-line. E.g. on a UART.
- */
-void printLn( void );
-
-
-// ---------------------------------- I2C functions ---------------------------------------------
-
-/**  Return codes for i2c functions: 
- */
-#define I2C_SUCCESS             0       /**< successfull execution no error */
-#define I2C_ERR_DATA_TOO_LONG   -1      /**< driver cannot handle given amount of data for tx/rx */
-#define I2C_ERR_SLAVE_ADDR_NAK  -2      /**< device nak'ed slave address */
-#define I2C_ERR_DATA_NAK        -3      /**< device nak'ed written data */
-#define I2C_ERR_OTHER           -4      /**< any other error */
-#define I2C_ERR_TIMEOUT         -5      /**< timeout in waiting for slave to respond */
 
 /** There are 2 styles of functions available:
  * 1. those that always require a register address to be specified: i2cTxReg, i2cRxReg
@@ -221,24 +260,45 @@ int8_t i2cRxReg( void * dptr, uint8_t slaveAddr, uint8_t regAddr, uint16_t toRx,
 int8_t i2cTxRx( void * dptr, uint8_t slaveAddr, uint16_t toTx, const uint8_t * txData, uint16_t toRx, uint8_t * rxData );
 
 
-/* --------------------- functions used by the application only (not driver) -------------------------------- */
-/* I.e. you must only implement these functions if you want to use the application. if you only use the 
- * c driver code you need not implement these functions. 
- */
+// ---------------------------------- UART functions --------------------------------------------
 
-/** @brief Function will open the serial input and clear the input pipe
+/** @brief Function will open the serial and clear the pipe
  * @param[in] baudrate serial rate in baud
  */
-void inputOpen( uint32_t baudrate );
+void uartOpen( uint32_t baudrate );
 
-/** @brief Function will close the serial input
+/** @brief Function will close the serial 
  */
-void inputClose( );
+void uartClose( );
 
-/** @brief Function reads the next character from standard input.
- * @param[out] c pointee is set to the character read from standard input; must not be a null pointer
- * \return 1 when a character was read and written to the pointee of c, else 0 */
-int8_t inputGetKey( char * c );
+/** @brief Function outputs a single character. E.g. on a UART.
+ *  @param[in] c the character to be printed 
+ */
+void printChar( char c );
+
+/** @brief Function outputs a signed integer. E.g. on a UART.
+ *  @param[in] i the integer to be printed 
+ */
+void printInt( int32_t i );
+
+/** @brief Function outputs an unsigned integer. E.g. on a UART.
+ *  @param[in] i the integer to be printed 
+ */
+void printUint( uint32_t i );
+
+/** @brief Function outputs an unsigned integer in HEX format. E.g. on a UART.
+ *  @param[in] i the integer to be printed 
+ */
+void printUintHex( uint32_t i );
+
+/** @brief Function outputs a zero terminated string. E.g. on a UART.
+ *  @param[in] str pointer to string to be printed  
+ */
+void printStr( char * str );
+
+/** @brief Function outputs a new-line. E.g. on a UART.
+ */
+void printLn( void );
 
 /** @brief Function outputs a zero terminated constant string. E.g. on a UART.
  *  @param[in] str pointer to constant string to be printed. On some systems constants can
@@ -246,33 +306,21 @@ int8_t inputGetKey( char * c );
  */
 void printConstStr( const char * str );
 
-/** @brief Function sets the given pin to output.
- *  @param[in] pin to be configured as output pin.   
- */
-void pinOutput( uint8_t pin );
 
-/** @brief Function sets the given pin to input.
- *  @param[in] pin to be configured as input pin.   
- */
-void pinInput( uint8_t pin );
+// ------------------------------------------------------------------------------------------------
+// readout functions that need special implementation on the Arduino Uno as the RAM is very limited 
 
-/** @brief Function registers given function handler as Interrupt Handler function for the
- *  interrupt pin
- *  @param[in] handler pointer to the interrupt service routine   
+/** @brief Function to read a 128 bytes == 1/4 of a 256 bin (2bytes) histogram
+ * needed as reading register 0x30 will lead to register bank switching
+ * on the device and the arduino uno can only read chunks of 32 bytes
+ * So this function reads the quater histogram in reverse order.
+ * @param[in] dptr ... a pointer to a data structure the function needs for transmitting, can
+ * be 0-pointer if the function does not need it
+ * @param[in] slaveAddr ... the i2c slave address to be used (7-bit)
+ * @param[in] buffer ... a pointer to a buffer of minimum size of 128 bytes
+ * \return 0 when successfully transmitted, else an error code 
  */
-void setInterruptHandler( void (* handler)( void ) );
-
-/** @brief Function removes any Interrupt Handler function
- */
-void clrInterruptHandler( void );
-
-/** @brief Function globally disables interrupts
- */
-void disableInterrupts( void );
-
-/** @brief Function globally enables interrupts
- */
-void enableInterrupts( void );
+int8_t tmf8806ReadQuadHistogram( void * dptr, uint8_t slaveAddr, uint8_t * buffer );
 
 /** @brief Function to print a single TDC channel histogram in a kind of CSV like format 
  * @param dptr a pointer to a data structure the function needs for transmitting, can
@@ -284,6 +332,7 @@ void enableInterrupts( void );
  * This function is directly called by the driver to dump a histogram to the UART
  */
 void tmf8806ScaleAndPrintHistogram( void * dptr, uint8_t histType, uint8_t id, uint8_t * data, uint8_t scale );
+
 
 #if defined( __cplusplus)
 }

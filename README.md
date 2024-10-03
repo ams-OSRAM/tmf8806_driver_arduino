@@ -1,6 +1,6 @@
-# TMF8806 (Time-of-flight) Arduino Uno driver  
+# TMF8806 (Time-of-flight) Low-Power Arduino Uno application  
 
-This is a simple universal driver to show the capabilies of the time-of-flight device TMF8806. 
+This is a low-power example which shows how to use the TMF8806 in applications that are battery powered. 
 
 ## Requirements  
 
@@ -12,159 +12,102 @@ This is a simple universal driver to show the capabilies of the time-of-flight d
 
 ## Files  
 
-The arduino project in the folder: **tmf8806_app** is a very simple single character command line interpreter listening/printing on UART
-It contains the following files:
+The arduino project consists of the following files:
 
-- **tmf8806_app.ino** - the arduino specific wrapper for the application
-- **tmf8806_app.h** and **tmf8806_app.cpp** - the TMF8806 command line application
-- **tmf8806.h** and **tmf8806.cpp** - the TMF8806 driver 
-- **tmf8806_shim.h** and **tmf8806_shim.cpp** - a shim to abstract the arduino specific I2C, UART and GPIO functions
-- **tmf8806_image.h** and **tmf8806_image.c** - the TMF8806 firmware that is downloaded by the driver as a c-struct
+- **tmf8806_low_power.ino** - the arduino specific wrapper for the application
+- **tmf8806_app.h** and **tmf8806_app.c** - the TMF8806 low-power application itself
+- **tmf8806.h** and **tmf8806.c** - the TMF8806 driver 
+- **tmf8806_shim.h** and **tmf8806_shim.cpp** - a shim to abstract the arduino specific I2C, UART, GPIO and low-power functions
+For the Arduino this needs to be a c++ file. However the shim layer for other platforms could also be a plain C file.
 
-You can use application interrupt driven. For this you need to set the following define to 1: **USE_INTERRUPT_TO_TRIGGER_READ**
 
-### Porting to another MCU
+## Configuration
 
-To port the driver and application to another platform you need to adapt the following files:
-- **tmf8806_a.ino** - the arduino specific wrapper for the application, replace this with the requirements for your selected platform
-- **tmf8806_shim.h** and **tmf8806_shim.cpp** - a shim to abstract the arduino specific I2C, UART and GPIO functions
+The low power example is written with compile-time configuration. The compile time configuration can be changed by modifying the
+following defines in the file **tmf8806_app.h**:
 
-## UART and command line interpreter  
+- **KILO_ITERATIONS** defines the number of integrations. The range is 10 - 4000, which is internally multiplied by 1000 (as these
+are kilo-iterations).  
+- **PERIOD_NO_OBJECT_IN_MS** defines the interval with which single shot measurements are executed when no object is detected in 
+the specified distance range (see parameters LOW_THESHOLD_MM and HIGH_THRESHOLD_MM). Note that the arduino uno uses for this
+purpose the watchdog timer which is limited in the available timing configuration to: 16ms, 32ms, 64ms, 128ms, 256ms 512ms, 512ms
+1024ms 2048ms 4096ms and 8192ms. The application will use an interval that is equal or bigger than the given PERIOD_NO_OBJECT_IN_MS. If it the number is greater than 8192 it will automatically be set to 8192.
+- **PERIOD_OBJECT_IN_MS** defines the interval with which single shot measurements are executed when an object is in the specified range.
+Same restrictions as for PERIOD_NO_OBJECT_IN_MS apply for this constant.
+- **PERSISTENCE** - defines many consecutive times any object has to be in the specified range before a "object-in-range" is signalled 
+(via UART and/or GPIO and/or LED). The value 0 has the special meaning that every object (including out-of-range objects) are reported. 
+E.g. a value of 3 means that there have to be 3 measurements in a row with: HIGH_THRESHOLD_MM >= object distance >= LOW_THRESHOLD_MM. 
+- **LOW_THRESHOLD_MM** - defines the minimum distance an object must have to be considered in range 
+- **HIGH_THRESHOLD_MM** - defines the minimum distance an object must have to be considered in range 
 
-The project listens and talks on the UART. Baud rate is 115200, 8-bit, no parity, 1 stop bit.
+- **OUTPUT_ON_UART** - if set to 1 results will be published on UART. If set to 0 the code that writes to the UART will be removed from the binary image. The configuration of the UART is 115200 baud, 8-bit data, 1 stop bit, no parity bit.
+- **OUTPUT_ON_LED** - if set to 1 and if an object is for at least PERSISTENCE measurements in a series in range the arduino built-in led will be on, else the led will be off. Note that the bootloader of the arduino also uses the built-in led during boot process so it will aso be on during booting. If set to 0 the code controlling the built-in led is removed from the binary image and the led will be in the state defined by the arduino uno bootloader.
+- **OUTPUT_ON_GPIO** - if set to 1 and if an object is for at least PERSISTENCE measurements in a series in range the gpio defined in file tmf8806_shim.h as **RESULT_PIN** will be high, else the pin will be low. If set to 0 the code controlling the gpio pin is removed from the binary image and the pin will be in the default state defined by the arduino uno.
 
-The command line interpreter uses single characters followed by ENTER as input commands. 
-For interfacing with a zeromq server the command line interpreter also supports complex command strings with binary payload.
 
-UART commands (single character)
+**Note:** The total integration time is the maximum of these 2 values: 
+1. Integration time defined through KILO_ITERATIONS plus data processing time and algorithm publishing time 
+2. Period of measurements
+E.g. if the period is shorter than the integration time than the measurements will happen with the period of the integration time.
 
-- a ... dump registers
-- c ... toggle configuration
-- d ... disable device
-- e ... enable device
-- f ... factory calibration
-- h ... help
-- i ... I2C address change
-- m ... start measure
-- p ... power down
-- s ... stop measure
-- t ... switch persistence and thresholds
-- w ... wakeup
-- x ... clock correction on/off
-- z ... histogram dump
-- + ... log level+
-- - ... log level-
+## Application control flow
 
-UART commands (binary payload)
+The application itself has 2 functions that are called from the arduino framework (see **tmf8806_low_power.ino** file):
+1. void setup( ) - is called only once after power up of the arduino
+2. void loop( ) - is called periodically while the arduino is running
 
-- b\x30<tmf8806FactoryCalibData data> .. set arbitrary factory calibration data
-- b\x31<tmf8806MeasureCmd data>       .. set arbitrary configuration
-- b\x32<pers,loThres,hiThres>         .. set arbitrary persistence / threshold
-
-## Command line interpreter application  
-
-The command line interpreter application mimics a simple host application. It allows the user to switch between 2 pre-defined configurations:  
-
-- Configuration 0: Period 33 ms, KiloIterations = 400
-- Configuration 1: single shot mode, KiloIterations = 100
-
-You can modify the configurations (e.g. choose different period or KiloIterations) in the application source file, recompile and download your own configuration application to the Arduino. 
-
-## Examples  
-
-### Power up device  
-
-Before the device can be used the host must power the device. The arduino uno setup function will pull the enable line to the TMF8806 low. I.e. the TMF8806 will be powered down.
-
-Enter the character
-
-- e  
-
-followed by ENTER to enable the device. If necessary the driver will automatically download the the firmware patch file to the TMF8806 RAM. The arduino uno will publish the FW version in the terminal:  
-
-e.g. version 192.4.11.0
-
-### Power up device and do measurements  
-
-Type the following commands on UART:
-
-- e 
-- m 
-
-The header for the results looks like this:  
- \#Obj,i2c_slave_address,result_number,reliability,measured_distance,corrected_distance,sys_clock,temperature,reference_hits,object_hits,crosstalk
-
-You will see measurement result records on the UART for the default configuration.  
-
-\#Obj,65,165,63,295,295,735639833,27,69216,27384,829
-\#Obj,65,166,63,295,295,735796255,27,69243,27459,830
-\#Obj,65,167,63,294,294,735951813,27,69362,27297,799
-
-# Factory calibration  
-
-Factory calibration must be done for each device. 
-
-The simplest way is to do a live factory calibration. I.e. do the following steps:
-1. Connect your Arduino Uno and tmf8806 to the PC via USB
-2. Start a terminal program 
-3. Configure and connect the terminal program to the arduino uno
-4. Make sure you have a cover glass on top of the TMF8806. This is needed for the crosstalk.
-5. Make sure there is no object in front of the TMF8806 within 40 cm.
-6. Enter the following commands in your terminal console:  
-    - e 
-    - f  
-7. The application reports the calibration data: e.g. #Cal,2,0,0,A,B0,BE,BD,7C,F5,F0,F3,F7,7,4
-8. If the application does not send the calibration data the calibration has failed. Check your cover glass and check if there is no object (within 40cm) in the field-of-view of the sensor.
-
-## Crosstalk readout
-
-The application reports the crosstalk with each measurement result. E.g.:
-
-\#Obj,65,167,63,294,294,735951813,27,69362,27297,799
-
-The crosstalk is the last field in the line.
-
-## I2C slave address changing
-
-Send the command "i" to the application to change the sensor I2C address. The application will report the new I2C address. E.g.: Addr=0x42
-
-# Histogram dumping  
-
-The device can also dump histograms. The order the Arduino Uno driver reports these histograms is exactly the same as the TMF8806 reports them on I2C.  
-
-There are five different types of histograms available  
-
-- electrical calibration histograms (ID=1)
-- proximity histograms (ID=2)
-- distance histograms (ID=4)
-- pileup-corrected distance histograms (ID=8)
-- summed histogram (ID=16)
-
-Type "z" and ENTER until you have the desired value for histogram dumping. E.g if the application sends:
-
-Histogram is 4
-
-distance histograms are configured for dumping. The application dumps ALL histograms if:
-
-Histogram is 31
-
-For all histograms, the first number after the marker (e.g. #TG7) will give the channel this histogram contains.
-
-There are always 10 histograms reported. 
-
-- Number  0 == TDC0, Channel0
-- Number  1 == TDC0, Channel1
-- ... 
-- Number  9 == TDC4, Channel0
-- Number 10 == TDC0, Channel1
+To have a portable application the actual code of the **setup** function and the **loop** function is implemented in the file **tmf8806_app.c**.
+The flow chart below shows the control flow of the application.
+![image](./pictures/low_power_flowchart.png)
  
-The header for the raw histograms looks like this:  
-\#<histogram_type>,bin_0,bin_1,...,bin_127
 
-Line Tag  | Histogram Type
-----------|-----------------------
-  \#CI    | electrical calibration
-  \#PT    | proximity
-  \#TG    | distance
-  \#TGPUC | pileup-corrected distance
-  \#SUM   | summed
+
+## Porting to another MCU
+
+To port the driver and application to another platform you need to adapt the following files:    
+- **tmf8806_a.ino** - the arduino specific wrapper for the application, replace this with the requirements for your selected platform
+- **tmf8806_shim.h** and **tmf8806_shim.cpp** - a shim to abstract the arduino specific functions
+
+The shim layer contains all arduino uno specific code and defines like e.g. which pin is used for the ENABLE line of the TMF8806, which pin is used for the INTERRUPT line of the TMF8806, which pin shall be used to signal that an object is in range.
+The arduino uno is an 8-bit processor which has some limitation on the I2C. the 2 most stringent are
+- maximum I2C frequency is 400KHz
+- maximum I2C block transfer size is 32 bytes (including the register address byte)
+
+
+## Measurement result
+
+### Current measurement
+Using default settings, the measured average current is only 26 uA.
+
+Power consumption profile:<br>
+![image](./pictures/power_consumption.png)
+<br> x-axis: 200ms/div
+<br> y-axis: 10mA/div
+
+Power consumption profile zoomed in:<br>
+![image](./pictures/power_consumption_zoom.png)
+<br> x-axis: 10ms/div
+<br> y-axis: 10mA/div
+
+### Check functionality using default settings
+Setup with no object in front. Expected period in ms: 1024
+<br> Measured INT Line: 1030 ms<br>
+![image](./pictures/eval_int_no_object.png)
+
+Setup with object in front. Expected period in ms: 128
+<br> Measured INT Line: 130 ms<br>
+![image](./pictures/eval_int_object.png)
+
+Persistence: 3
+<br>Low Threshold: 50
+<br>High Threshold: 200<br>
+![image](./pictures/eval_persistence.png)
+
+Output on UART: ON<br>
+![image](./pictures/eval_uart.png)
+
+Output on LED: ON<br>
+![image](./pictures/eval_led.png)
+
+Output on GPIO: ON<br>
+![image](./pictures/eval_GPIO.png)

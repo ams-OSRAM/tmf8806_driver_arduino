@@ -1,24 +1,10 @@
-/*
- *****************************************************************************
- * Copyright by ams OSRAM AG                                                       *
- * All rights are reserved.                                                  *
- *                                                                           *
- * IMPORTANT - PLEASE READ CAREFULLY BEFORE COPYING, INSTALLING OR USING     *
- * THE SOFTWARE.                                                             *
- *                                                                           *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS       *
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT         *
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS         *
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT  *
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,     *
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT          *
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,     *
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY     *
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT       *
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE     *
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.      *
- *****************************************************************************
- */
+/*****************************************************************************
+* Copyright (c) [2024] ams-OSRAM AG                                          *
+* All rights are reserved.                                                   *
+*                                                                            *
+* FOR FULL LICENSE TEXT SEE LICENSE.TXT                                      *
+******************************************************************************/
+ 
 
 /** @file This is the tmf8806 driver. 
  * This file contains all functionality to control the tmf8806. It uses the
@@ -438,7 +424,7 @@ int8_t tmf8806ConfigureHistograms( tmf8806Driver * driver, uint8_t histograms );
 int8_t tmf8806ReadHistograms( tmf8806Driver * driver );
 
 /** @brief Function to set the interrupt trigger thresholds in mm
- * @param driver ... pointer to an instance of hte tmf8806 driver data structure
+ * @param driver ... pointer to an instance of the tmf8806 driver data structure
  * @param persistence ... if set to 0 every (even a 0-result) will trigger an interrupt, 
  *                 if set to 1 only a non-zero result will trigger an interrupt
  *                 if set to n > 1, only if n consecutive results are non-zero will trigger an interrupt
@@ -449,7 +435,7 @@ int8_t tmf8806ReadHistograms( tmf8806Driver * driver );
 int8_t tmf8806SetThresholds( tmf8806Driver * driver, uint8_t persistence, uint16_t lowThreshold, uint16_t highThreshold );
 
 /** @brief Function to read the interrupt trigger thresholds in mm
- * @param driver ... pointer to an instance of hte tmf8806 driver data structure
+ * @param driver ... pointer to an instance of the tmf8806 driver data structure
  * @param persistence ... pointer to an uint8_t variable will contain the persistence value
  * @param lowThreshold ... pointer to an uint16_t variable will contain the low threshold value
  * @param highThreshold ... pointer to an uint16_t variable will contain the high threshold value
@@ -462,7 +448,7 @@ int8_t tmf8806GetThresholds( tmf8806Driver * driver, uint8_t * persistence, uint
  * immediately changes the slaveAddress to the new one. If the pattern is not available the device will not 
  * switch to the new i2c address and use the original one.
  * function will switch i2c address if the following is true: ((gpio & gpioMask) == (gpioPattern & gpioMask))
- * @param driver ... pointer to an instance of hte tmf8806 driver data structure
+ * @param driver ... pointer to an instance of the tmf8806 driver data structure
  * @param slaveAddress ... the unshifted 7-bit device i2c slave address
  * @param gpioPattern ... pattern that shall be used for deciding if address shall be changed (2-bits only)
  * @param gpioMask ... mask that shall be used for deciding if address shall be changed (2-bits only)
