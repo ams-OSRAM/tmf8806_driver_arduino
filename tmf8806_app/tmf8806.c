@@ -1,34 +1,19 @@
-/*
- *****************************************************************************
- * Copyright by ams OSRAM AG                                                       *
- * All rights are reserved.                                                  *
- *                                                                           *
- * IMPORTANT - PLEASE READ CAREFULLY BEFORE COPYING, INSTALLING OR USING     *
- * THE SOFTWARE.                                                             *
- *                                                                           *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS       *
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT         *
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS         *
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT  *
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,     *
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT          *
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,     *
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY     *
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT       *
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE     *
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.      *
- *****************************************************************************
- */
+/*****************************************************************************
+* Copyright (c) [2024] ams-OSRAM AG                                          *
+* All rights are reserved.                                                   *
+*                                                                            *
+* FOR FULL LICENSE TEXT SEE LICENSE.TXT                                      *
+******************************************************************************/
+ 
 
 //  simple tmf8806 driver
 
-// --------------------------------------------------- includes --------------------------------
+// --------------------------------------------------- includes -------------------------------
 
 #include "tmf8806.h"
 #include "tmf8806_shim.h"
 
-
-// --------------------------------------------------- defines for HW registers --------------------------------
+// --------------------------------------------------- defines for HW registers ---------------
 
 #define ENABLE_OFFSET 0xe0
 #define ENABLE__cpu_reset__WIDTH 1
@@ -111,7 +96,6 @@
 #define TMF8806_COM_APP_ID__bootloader                      0x80  // bootloader application id
 
 #define TMF8806_CPU_IS_READY_MASK (REG_MASK(ENABLE__cpu_ready) | REG_MASK(ENABLE__pon))
-
 
 // --------------------------------------------------- bootloader -----------------------------
 
@@ -286,8 +270,9 @@ const tmf8806DeviceInfo tmf8806DeviceInfoReset =
 
 // -------------------------------------------------------- functions ----------------------------------------------
 
-void tmf8806ScaleAndPrintHistogram ( void * dptr, uint8_t histType, uint8_t id, uint8_t * data, uint8_t scale );
+void tmf8806ScaleAndPrintHistogram( void * dptr, uint8_t histType, uint8_t id, uint8_t * data, uint8_t scale );
 static void tmf8806ResetClockCorrection( tmf8806Driver * driver );
+static void tmf8806CalculateMaximumDistance( tmf8806Driver * driver );
 
 void tmf8806Initialise ( tmf8806Driver * driver, uint8_t logLevel )
 {
@@ -300,6 +285,7 @@ void tmf8806Initialise ( tmf8806Driver * driver, uint8_t logLevel )
   driver->stateData = defaultStateData;
   driver->info = tmf8806DriverInfoReset;
   driver->device = tmf8806DeviceInfoReset;
+  driver->maximumDistance = 0xFFFF;
 }
 
 // Function to overwrite the default log level
@@ -833,6 +819,8 @@ static int8_t tmf8806ConfigureAndExecute ( tmf8806Driver * driver, uint8_t cmd, 
   uint8_t cmdSave = driver->measureConfig.data.command;
   driver->measureConfig.data.kIters = kIter;                                 // save to restore later
   driver->measureConfig.data.command = cmd;                                // save to restore later
+  tmf8806CalculateMaximumDistance( driver );
+  
   if ( driver->measureConfig.data.data.factoryCal )
   { 
     tmf8806SerializeFactoryCalibration( &(driver->factoryCalib), ptr );
@@ -973,7 +961,12 @@ int8_t tmf8806ReadResult ( tmf8806Driver * driver, tmf8806DistanceResultFrame * 
     uint32_t tTick = tmf8806GetUint32( driver->dataBuffer + RESULT_REG( SYS_TICK_0 ) );
     tmf8806ClockCorrectionAddPair( driver, hTick, tTick );
     tmf8806DeserializeResultFrame( &(driver->dataBuffer[RESULT_REG(RESULT_NUMBER)]), result ); // unpack byte-stream to frame
-    tmf8806DeserializeStateData( result->stateData, &(driver->stateData) );      // update driver internal state data copy
+    tmf8806DeserializeStateData( result->stateData, &(driver->stateData) );      // update driver internal state data copy    
+    if ( result->distPeak > driver->maximumDistance )
+    {
+      result->distPeak = 0;
+      result->reliability = 0;
+    }
     return APP_SUCCESS_OK;
   }
   return APP_ERROR_NO_RESULT_PAGE;
@@ -1016,6 +1009,28 @@ static uint16_t tmf8806CalcClkRatioUQ16 ( uint32_t hDiff, uint32_t tDiff, uint16
   return (uint16_t)ratioUQ;           // return an UQ1.15 = [0..2)
 }
 
+// calculate maximum allowed distance for each distance mode
+static void tmf8806CalculateMaximumDistance ( tmf8806Driver * driver )
+{
+  /* default to 10m mode limit */
+  driver->maximumDistance = TMF8806_MAX_DISTANCE_5M_MODE * 2; 
+
+  /* reserved is a 2bit bitfield,if reserved == 2 or reserved == 3 -> 10 mode is active */
+  if ( driver->measureConfig.data.algo.reserved < TMF8806_10M_MODE_ACTIVE )
+  {
+    if ( driver->measureConfig.data.algo.distanceMode == TMF8806_5M_MODE_ACTIVE )
+    {
+      /* 5m mode active */
+      driver->maximumDistance = TMF8806_MAX_DISTANCE_5M_MODE;
+    }
+    else
+    {
+      /* 2.5m mode enabled */
+      driver->maximumDistance = TMF8806_MAX_DISTANCE_5M_MODE / 2;
+    }
+  }
+}
+
 // Correct the distance based on the clock correction pairs 
 uint16_t tmf8806CorrectDistance ( tmf8806Driver * driver, uint16_t distance )
 {
@@ -1029,24 +1044,26 @@ uint16_t tmf8806CorrectDistance ( tmf8806Driver * driver, uint16_t distance )
       uint32_t hDiff = driver->hostTicks[ idx ] - driver->hostTicks[ idx2 ];
       uint32_t tDiff = driver->tmf8806Ticks[ idx ] - driver->tmf8806Ticks[ idx2 ];
       driver->clkCorrRatioUQ = tmf8806CalcClkRatioUQ16( hDiff, tDiff, driver->clkCorrRatioUQ );
+
+      // if ( driver->logLevel & TMF8806_LOG_LEVEL_CLK_CORRECTION )
+      // {
+      //   PRINT_LN( );
+      //   PRINT_CHAR( '?' );
+      //   PRINT_UINT( hDiff * TMF8806_TICKS_PER_10_US );  // normalize to compare
+      //   PRINT_CHAR( ' ' );
+      //   PRINT_UINT( tDiff * HOST_TICKS_PER_10_US );     // normalize to compare
+      //   PRINT_CHAR( ' ' );
+      //   PRINT_UINT( driver->clkCorrRatioUQ );
+      //   PRINT_CHAR( ' ' );
+      //   PRINT_UINT( distance );
+      //   PRINT_CHAR( ' ' );
+      //   PRINT_UINT( d );
+      //   PRINT_CHAR( '?' );
+      //   PRINT_LN( );
+      // }
     } /* else use last valid clock correction Ration UQ */
+    
     d = ( driver->clkCorrRatioUQ * d + (1<<14) ) >> 15;
-    // if ( driver->logLevel & TMF8806_LOG_LEVEL_CLK_CORRECTION )
-    // {
-    //   PRINT_LN( );
-    //   PRINT_CHAR( '?' );
-    //   PRINT_UINT( hDiff * TMF8806_TICKS_PER_10_US );  // normalize to compare
-    //   PRINT_CHAR( ' ' );
-    //   PRINT_UINT( tDiff * HOST_TICKS_PER_10_US );     // normalize to compare
-    //   PRINT_CHAR( ' ' );
-    //   PRINT_UINT( driver->clkCorrRatioUQ );
-    //   PRINT_CHAR( ' ' );
-    //   PRINT_UINT( distance );
-    //   PRINT_CHAR( ' ' );
-    //   PRINT_UINT( d );
-    //   PRINT_CHAR( '?' );
-    //   PRINT_LN( );
-    // }
     distance = SATURATE16( d );
   }
   return distance;
@@ -1189,6 +1206,14 @@ int8_t tmf8806SetI2CSlaveAddress ( tmf8806Driver * driver, uint8_t slaveAddress,
     res = APP_ERROR_I2C_ADDR_SET;
   }
   return res;
+}
+
+int8_t tmf8806StartRemoteControlMode ( tmf8806Driver * driver, uint8_t vcselCurrent )
+{
+  driver->dataBuffer[0] = vcselCurrent & 0x0F; /* limit VCSEL current setting to range 0 .. 15 */
+  driver->dataBuffer[1] = TMF8806_COM_CMD_STAT__remote_control_mode;
+  i2cTxReg( driver, driver->i2cSlaveAddress, TMF8806_COM_CMD_REG - 1, 2, driver->dataBuffer );
+  return tmf8806AppCheckCommandDone( driver, TMF8806_COM_CMD_STAT__remote_control_mode, APP_CMD_MEASURE_TIMEOUT_MS ); 
 }
 
 // ---------------------------------------------------------------------------------------------------------

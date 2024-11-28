@@ -1,24 +1,10 @@
-/*
- *****************************************************************************
- * Copyright by ams OSRAM AG                                                       *
- * All rights are reserved.                                                  *
- *                                                                           *
- * IMPORTANT - PLEASE READ CAREFULLY BEFORE COPYING, INSTALLING OR USING     *
- * THE SOFTWARE.                                                             *
- *                                                                           *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS       *
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT         *
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS         *
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT  *
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,     *
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT          *
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,     *
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY     *
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT       *
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE     *
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.      *
- *****************************************************************************
- */
+/*****************************************************************************
+* Copyright (c) [2024] ams-OSRAM AG                                          *
+* All rights are reserved.                                                   *
+*                                                                            *
+* FOR FULL LICENSE TEXT SEE LICENSE.TXT                                      *
+******************************************************************************/
+ 
 
 #ifndef TMF8806_REGS_H
 #define TMF8806_REGS_H
@@ -107,7 +93,7 @@ union _tmf8806MeasureCmd
             uint8_t distanceMode:1;       /*!< **NEW** When 0 measure up to 2.5m. When 1 measure up to 4m. 4m mode is only activated if the VCSEL clock is configured for 20MHz. Fall back to 2.5m mode if VCSEL clock is 40 MHz. */
             uint8_t immediateInterrupt:1; /*!< When 1 target distance measurement will immediately report to the host an interrupt of the capturing caused by a GPIO event. 
                                                When 0, will only report to the host when target distance measurement was finished. */
-            uint8_t reserved:2;           /*!< Was legacy result structure selector. Ignored. */
+            uint8_t reserved:2;           /*!< When 0 or 1 this bit field has no effect, when 2 switch to 10m mode (firmware patch >4.14.11.x mandatory) */
             uint8_t algKeepReady:1;       /*!< When 1 do not go to standby between measurements, and keep charge pump and histogram RAM between measurements */
         } algo;
         struct _tmf8806MeasureCmdGpioSettings

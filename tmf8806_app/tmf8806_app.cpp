@@ -1,24 +1,10 @@
-/*
- *****************************************************************************
- * Copyright by ams OSRAM AG                                                 *
- * All rights are reserved.                                                  *
- *                                                                           *
- * IMPORTANT - PLEASE READ CAREFULLY BEFORE COPYING, INSTALLING OR USING     *
- * THE SOFTWARE.                                                             *
- *                                                                           *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS       *
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT         *
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS         *
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT  *
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,     *
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT          *
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,     *
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY     *
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT       *
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE     *
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.      *
- *****************************************************************************
- */
+/*****************************************************************************
+* Copyright (c) [2024] ams-OSRAM AG                                          *
+* All rights are reserved.                                                   *
+*                                                                            *
+* FOR FULL LICENSE TEXT SEE LICENSE.TXT                                      *
+******************************************************************************/
+ 
 //
 // tmf8806 arduino uno driver example console application
 //
@@ -216,6 +202,9 @@ void printHelp ( )
   PRINT_LN( ); PRINT_CONST_STR( F( "i .. i2c addr change" ) );
   PRINT_LN( ); PRINT_CONST_STR( F( "m .. measure" ) );
   PRINT_LN( ); PRINT_CONST_STR( F( "p .. power down" ) );
+#ifndef USE_ROM_FIRMWARE
+  PRINT_LN( ); PRINT_CONST_STR( F( "r .. remote control mode" ) );
+#endif  
   PRINT_LN( ); PRINT_CONST_STR( F( "s .. stop measure" ) );
   PRINT_LN( ); PRINT_CONST_STR( F( "t .. set pers+thresholds" ) );
   PRINT_LN( ); PRINT_CONST_STR( F( "w .. wakeup" ) );
@@ -287,6 +276,7 @@ void tmf8806PrintFactoryCalibration ( tmf8806Driver * driver )
   for ( uint8_t b = 0; b < sizeof(tmf8806FactoryCalibData); ++b )
   {
     PRINT_CHAR( SEPARATOR );
+    PRINT_CONST_STR(F("0x"));
     PRINT_UINT_HEX(cal[b]);
   }
   PRINT_LN();
@@ -348,7 +338,11 @@ void enable ( )
     tmf8806Wakeup( &tmf8806 );
     if ( tmf8806IsCpuReady( &tmf8806, CPU_READY_TIME_MS ) )
     {
+#ifdef USE_ROM_FIRMWARE
       if ( tmf8806SwitchToRomApplication( &tmf8806 ) == BL_SUCCESS_OK )
+#else      
+      if ( tmf8806DownloadFirmware(&tmf8806,tmf8806_image_start, tmf8806_image, tmf8806_image_length) == BL_SUCCESS_OK )      
+#endif      
       {
         resetAppState( );                         // set everything to default
         printDeviceInfo( );
@@ -434,6 +428,17 @@ void i2cAddressChange ( )
   }
 }
 
+void remoteControlMode ( )
+{
+  /* 0x0F -> use maximum VCSEL current for remote control mode */
+  if ( ( stateTmf8806 == TMF8806_STATE_STOPPED ) && ( tmf8806StartRemoteControlMode( &tmf8806, 0x0F ) == APP_SUCCESS_OK ) )
+  {
+    stateTmf8806 = TMF8806_STATE_MEASURE;
+    PRINT_CONST_STR( F( "RC mode on" ) );
+    PRINT_LN();
+  }
+}
+
 void logUp ( )
 {
   llIdx++;
@@ -488,7 +493,7 @@ void powerDown ( )
 
 void stop ( )
 {
-  if ( stateTmf8806 != TMF8806_STATE_DISABLED )
+  if ( ( stateTmf8806 != TMF8806_STATE_DISABLED ) && ( stateTmf8806 != TMF8806_STATE_STANDBY ) )
   {
     tmf8806StopMeasurement( &tmf8806 );
     tmf8806DisableAndClrInterrupts( &tmf8806, 0xFF );               // just disable all
@@ -705,8 +710,15 @@ int8_t handleCharInput ( char key )
     }
     else if ( key == 'q' )       // quit program
     {
-      return 1;                 // fast exit -> want to terminate programm (if possible on the platform)
+      return 1;                  // fast exit -> want to terminate programm (if possible on the platform)
     }
+#ifndef USE_ROM_FIRMWARE         
+    // remote control mode needs firmware patch
+    else if ( key == 'r' )       // start remote control mode
+    {
+      remoteControlMode();                 
+    }
+#endif    
     else if ( key == 's' )       // stop measure
     {
       stop( );

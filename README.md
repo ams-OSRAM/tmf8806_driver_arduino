@@ -47,6 +47,7 @@ UART commands (single character)
 - i ... I2C address change
 - m ... start measure
 - p ... power down
+- r ... remote control mode
 - s ... stop measure
 - t ... switch persistence and thresholds
 - w ... wakeup
@@ -113,8 +114,34 @@ The simplest way is to do a live factory calibration. I.e. do the following step
 6. Enter the following commands in your terminal console:  
     - e 
     - f  
-7. The application reports the calibration data: e.g. #Cal,2,0,0,A,B0,BE,BD,7C,F5,F0,F3,F7,7,4
+7. The application reports the calibration data: e.g. #Cal,0x2,0x0,0x0,0xA,0xB0,0xBE,0xBD,0x7C,0xF5,0xF0,0xF3,0xF7,0x7,0x4
 8. If the application does not send the calibration data the calibration has failed. Check your cover glass and check if there is no object (within 40cm) in the field-of-view of the sensor.
+
+To use the obtained factory calibration data as default add this code to the sketch:
+
+```
+static const uint8_t deviceFactoryCalibration[sizeof(tmf8806FactoryCalibData)] = 
+{
+  0x2,0x0,0x0,0xA,0xB0,0xBE,0xBD,0x7C,0xF5,0xF0,0xF3,0xF7,0x7,0x4
+};
+
+void tmf8806Initialise ( tmf8806Driver * driver, uint8_t logLevel )
+{
+  tmf8806ResetClockCorrection( driver );
+  driver->i2cSlaveAddress = TMF8806_SLAVE_ADDR;
+  driver->clkCorrectionEnable = 1;                  // default is on
+  driver->logLevel = logLevel;
+  driver->measureConfig = defaultConfig;
+  // driver->factoryCalib = defaultFactoryCalib;
+  tmf8806DeserializeFactoryCalibration(deviceFactoryCalibration,&(driver->factoryCalib));
+  driver->stateData = defaultStateData;
+  driver->info = tmf8806DriverInfoReset;
+  driver->device = tmf8806DeviceInfoReset;
+}
+```
+
+Put the device calibration data into the array **deviceFactoryCalibration** and replace the assignment of the default factory 
+calibration with a call to deserialize the calibration data from that array.
 
 ## Crosstalk readout
 
@@ -168,3 +195,10 @@ Line Tag  | Histogram Type
   \#TG    | distance
   \#TGPUC | pileup-corrected distance
   \#SUM   | summed
+
+## Remote Control Mode
+
+This is a new operation mode for the TMF8806 VCSEL (laser diode) to act as an infrared LED controlled 
+by the input signal on GPIO1. GPIO1 == LO -> VCSEL OFF, GPIO1 == HI -> VCSEL ON. 
+This function requires firmware patch 4.14.1.x or newer. It does not work with standard ROM firmware.
+To exit the remote control mode send the command "s" (stop measure).

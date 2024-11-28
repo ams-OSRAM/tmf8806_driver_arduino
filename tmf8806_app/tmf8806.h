@@ -1,24 +1,10 @@
-/*
- *****************************************************************************
- * Copyright by ams OSRAM AG                                                       *
- * All rights are reserved.                                                  *
- *                                                                           *
- * IMPORTANT - PLEASE READ CAREFULLY BEFORE COPYING, INSTALLING OR USING     *
- * THE SOFTWARE.                                                             *
- *                                                                           *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS       *
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT         *
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS         *
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT  *
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,     *
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT          *
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,     *
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY     *
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT       *
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE     *
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.      *
- *****************************************************************************
- */
+/*****************************************************************************
+* Copyright (c) [2024] ams-OSRAM AG                                          *
+* All rights are reserved.                                                   *
+*                                                                            *
+* FOR FULL LICENSE TEXT SEE LICENSE.TXT                                      *
+******************************************************************************/
+ 
 
 /** @file This is the tmf8806 driver. 
  * This file contains all functionality to control the tmf8806. It uses the
@@ -42,40 +28,45 @@ extern "C"
 // ---------------------------------------------- defines -----------------------------------------
 
 /** Driver version number
- * 1.0 ... initial working version for tmf8806 (tmf8805 patch)
- * 1.1 ... added support for interrupts
- * 1.2 ... added support for device and driver info records
- * 1.3 ... interrupt pin driven handling also supported, fixed bug in uint32_t decoding on Arduino
- *         Uno (implicit cast was only to uint16_t not uint32_t) by using explicit casting
- * 1.4 ... support for info records added
- * 1.5 ... support for thresholds, persistence and i2c address change
- * 1.6 ... now check also for application commands if the state-machine changes into
- *         state error (fast exit)
- * 1.7 ... error handling streamlined
- * 1.8 ... device sys-tick is only valid if LSB is set
- * 1.9 ... correct to 4.7 MHz oscillator, add configurable factory calibration
- * 1.10 .. increase wait time window for wake-up to 2 ms 
- * 1.11 .. updated comments after review from M. Pelzmann
- * 1.12 .. added delay for wakeup sequence of 200 usec. to allow device to wakeup properly
- * 1.13 .. added a function to wait for cold-start shutdown of device
- * 2.1 ... adapted to use a true tmf8806
- * 2.2 ... refactored to be better portable
- * 2.3 ... more cleanup after review
- * 2.4 ... modification of shim layer for reading single bytes
- * 2.5 ... fixed clock ratio computation for clock correction
- * 2.6 ... show new I2C address after changing
- * 2.7 ... add binary interface to set arbitrary thresholds/persistence
- * 2.8 ... fix calibration data writing
+ * 1.0  ... initial working version for tmf8806 (tmf8805 patch)
+ * 1.1  ... added support for interrupts
+ * 1.2  ... added support for device and driver info records
+ * 1.3  ... interrupt pin driven handling also supported, fixed bug in uint32_t decoding on Arduino
+ *          Uno (implicit cast was only to uint16_t not uint32_t) by using explicit casting
+ * 1.4  ... support for info records added
+ * 1.5  ... support for thresholds, persistence and i2c address change
+ * 1.6  ... now check also for application commands if the state-machine changes into
+ *          state error (fast exit)
+ * 1.7  ... error handling streamlined
+ * 1.8  ... device sys-tick is only valid if LSB is set
+ * 1.9  ... correct to 4.7 MHz oscillator, add configurable factory calibration
+ * 1.10  .. increase wait time window for wake-up to 2 ms 
+ * 1.11  .. updated comments after review from M. Pelzmann
+ * 1.12  .. added delay for wakeup sequence of 200 usec. to allow device to wakeup properly
+ * 1.13  .. added a function to wait for cold-start shutdown of device
+ * 2.1  ... adapted to use a true tmf8806
+ * 2.2  ... refactored to be better portable
+ * 2.3  ... more cleanup after review
+ * 2.4  ... modification of shim layer for reading single bytes
+ * 2.5  ... fixed clock ratio computation for clock correction
+ * 2.6  ... show new I2C address after changing
+ * 2.7  ... add binary interface to set arbitrary thresholds/persistence
+ * 2.8  ... fix calibration data writing
+ * 2.9  ... support firmware patch download
+ * 2.10 ... support IR remote control mode, documentation update, #ifdef for ROM firmware
+ * 2.11 ... add function to limit output distance for each measurement mode
+ * 2.12 ... changed to MIT license, use ROM firmware as default
 */
 #define TMF8806_DRIVER_MAJOR_VERSION  2
-#define TMF8806_DRIVER_MINOR_VERSION  8
+#define TMF8806_DRIVER_MINOR_VERSION  12
 
+/* maximum reported distance for the 5m mode, double for 10m mode, halve for 2.5m mode */
+#define TMF8806_MAX_DISTANCE_5M_MODE  (5300)
+#define TMF8806_10M_MODE_ACTIVE       (2u)
+#define TMF8806_5M_MODE_ACTIVE        (1u)
 
 /** simple macro to construct a register bit-mask */
 #define REG_MASK(F)  ( ((1 << (F##__WIDTH)) - 1) << (F##__SHIFT) )
-
-
-
 
 /** how many histograms there are maximum */
 #define TMF8806_NUMBER_HISTOGRAMS    5
@@ -86,7 +77,6 @@ extern "C"
 #define TMF8806_DUMP_HIST_DISTANCE           4
 #define TMF8806_DUMP_HIST_ALG_PILEUP         8
 #define TMF8806_DUMP_HIST_ALG_PU_TDC_SUM     16
-
 
 /** tmf8806 has as default i2c slave address 0x41 */
 #define TMF8806_SLAVE_ADDR          0x41
@@ -163,6 +153,8 @@ extern "C"
 #define TMF8806_COM_CMD_STAT__cmd_factory_calibration       0x0a  /**< application command to Perform a factory calibration */
 #define TMF8806_COM_CMD_STAT__cmd_read_serial_number        0x47  /**< application command to read serial number */
 #define TMF8806_COM_CMD_STAT__cmd_wr_i2c_address            0x49  /**< application command to change the i2c slave address with next pattern on gpio0/1 as specified */
+#define TMF8806_COM_CMD_STAT__remote_control_mode           0xC0  /**< application command to start IR remote control mode */
+
 #define TMF8806_COM_CMD_STAT__cmd_stop                      0xff  /**< application command Stop a measurement */
 
 /* Clock correction pairs must be a power of 2 value. */
@@ -228,6 +220,7 @@ typedef struct _tmf8806Driver
   uint8_t clkCorrectionEnable;                      /**< default is clock correction on */
   uint8_t i2cSlaveAddress;                          /**< i2c slave address (7-bit unshifed) to talk to device */
   uint8_t logLevel;                                 /**< how chatty the program is */
+  uint16_t maximumDistance;                         /**< maximum reported distance for the current operation mode */
   uint8_t dataBuffer[ TMF8806_DATA_BUFFER_SIZE ];   /**< driver scratch buffer for i2c tx/rx */ 
 } tmf8806Driver;
 
@@ -414,12 +407,15 @@ void tmf8806DisableAndClrInterrupts( tmf8806Driver * driver, uint8_t mask );
 /** @brief Function to read results. This function should only be called when there was a 
  * result interrupt (use function tmf8806GetAndClrInterrupts to find this out). 
  * @param driver ... pointer to an instance of the tmf8806 driver data structure
+ * @param result ... pointer to an instance of the tmf8806 result data structure
  * @return Function returns APP_SUCCESS_OK if there was a result page, else APP_ERROR_NO_RESULT_PAGE.
  */ 
 int8_t tmf8806ReadResult( tmf8806Driver * driver, tmf8806DistanceResultFrame * result );
 
 /** @brief Correct the distance based on the clock correction pairs 
  * @param driver ... pointer to an instance of the tmf8806 driver data structure
+ * @param distance ... uncorrected distance
+ * @return Function returns the corrected distance
  */ 
 uint16_t tmf8806CorrectDistance( tmf8806Driver * driver, uint16_t distance );
 
@@ -438,7 +434,7 @@ int8_t tmf8806ConfigureHistograms( tmf8806Driver * driver, uint8_t histograms );
 int8_t tmf8806ReadHistograms( tmf8806Driver * driver );
 
 /** @brief Function to set the interrupt trigger thresholds in mm
- * @param driver ... pointer to an instance of hte tmf8806 driver data structure
+ * @param driver ... pointer to an instance of the tmf8806 driver data structure
  * @param persistence ... if set to 0 every (even a 0-result) will trigger an interrupt, 
  *                 if set to 1 only a non-zero result will trigger an interrupt
  *                 if set to n > 1, only if n consecutive results are non-zero will trigger an interrupt
@@ -449,7 +445,7 @@ int8_t tmf8806ReadHistograms( tmf8806Driver * driver );
 int8_t tmf8806SetThresholds( tmf8806Driver * driver, uint8_t persistence, uint16_t lowThreshold, uint16_t highThreshold );
 
 /** @brief Function to read the interrupt trigger thresholds in mm
- * @param driver ... pointer to an instance of hte tmf8806 driver data structure
+ * @param driver ... pointer to an instance of the tmf8806 driver data structure
  * @param persistence ... pointer to an uint8_t variable will contain the persistence value
  * @param lowThreshold ... pointer to an uint16_t variable will contain the low threshold value
  * @param highThreshold ... pointer to an uint16_t variable will contain the high threshold value
@@ -462,7 +458,7 @@ int8_t tmf8806GetThresholds( tmf8806Driver * driver, uint8_t * persistence, uint
  * immediately changes the slaveAddress to the new one. If the pattern is not available the device will not 
  * switch to the new i2c address and use the original one.
  * function will switch i2c address if the following is true: ((gpio & gpioMask) == (gpioPattern & gpioMask))
- * @param driver ... pointer to an instance of hte tmf8806 driver data structure
+ * @param driver ... pointer to an instance of the tmf8806 driver data structure
  * @param slaveAddress ... the unshifted 7-bit device i2c slave address
  * @param gpioPattern ... pattern that shall be used for deciding if address shall be changed (2-bits only)
  * @param gpioMask ... mask that shall be used for deciding if address shall be changed (2-bits only)
@@ -470,6 +466,15 @@ int8_t tmf8806GetThresholds( tmf8806Driver * driver, uint8_t * persistence, uint
  */ 
 int8_t tmf8806SetI2CSlaveAddress( tmf8806Driver * driver, uint8_t slaveAddress, uint8_t gpioPattern, uint8_t gpioMask );
 
+/**
+ * @brief Function to switch on the IR remote control mode. Firmware patch 4.14.1.x or newer required. 
+ * Does not work with standard ROM firmware. This is a new operation mode for the TMF8806 VCSEL (laser diode) to act as an 
+ * infrared LED controlled by the input signal on GPIO1. GPIO1 == LO -> VCSEL OFF, GPIO1 == HI -> VCSEL ON.
+ * @param driver ... pointer to an instance of the tmf8806 driver data structure
+ * @param vcselCurrent ... current setting for the TMF8806 VCSEL, higher values for higher remote control range, value range 0 .. 15
+ * @return function returns APP_SUCCESS_OK if the command was executed successully, else it returns an error APP_ERROR_*
+ */
+int8_t tmf8806StartRemoteControlMode( tmf8806Driver * driver, uint8_t vcselCurrent );
 
 // ------ serialize/deserialize functions --------------------------------------------------------
 
